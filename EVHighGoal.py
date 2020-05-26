@@ -19,19 +19,18 @@ joes setings
 [{"name":"connect_verbose","value":1},{"name":"contrast","value":44},{"name":"saturation","value":64},{"name":"hue","value":18},{"name":"white_balance_automatic","value":false},{"name":"exposure","value":1},{"name":"gain_automatic","value":false},{"name":"gain","value":31},{"name":"horizontal_flip","value":false},{"name":"vertical_flip","value":false},{"name":"power_line_frequency","value":0},{"name":"sharpness","value":0},{"name":"auto_exposure","value":1}]
 '''
 
-import json
-import time
-import sys
-from threading import Thread
-import socket
-import queue
-import threading
 from cscore import CameraServer, VideoSource
 import cv2
+import json
+import math
 import numpy as np
 from numpy import mean
-import math
-
+import queue
+import socket
+import sys
+import threading
+from threading import Thread
+import time
 
 # Image Camera Size (Pixels)
 Camera_Image_Width = 640
@@ -46,27 +45,18 @@ VerticalAspect = 3
 DiagonalAspect = math.hypot(HorizontalAspect, VerticalAspect)
 
 
-# Ball HSV Values
-Ball_HSV_Lower = np.array([13, 67, 188])
-Ball_HSV_Upper = np.array([62, 255, 255])
-
-#Non changing distance variables
-#PSEYE WIDE ANGLE FOV = 75, CLOSE ANGLE = 56
-FOV = 75
 
 # High goal height = 8 feet, 2.25 inches, actual height of center goal is 96.25,
 # Centroid of the tape is ~87.75 inches (center of height of tape)
 # tape is 1 ft 5inches, 17 inches/2 = 8.5 inches. 96.25-8.5 gives 87.75
-
-#Camera height is 37.5 inches
-targetHeightInches = 50.25
-
 camPixelWidth = 640
 # target reflective tape width in feet (3 feet, 3 & 1/4 inch) ~3.27
 Tft = 3.27
 
 # theta = 1/2 FOV,
-tanFOV = math.tan(FOV / 2)
+#Non changing distance variables
+#PSEYE WIDE ANGLE FOV = 75, CLOSE ANGLE = 56
+tanFOV = math.tan(75 / 2)
 
 
 
@@ -238,9 +228,6 @@ orange_blur = 27
 lower_green = np.array([65, 36.131, 83])
 upper_green = np.array([98, 255, 195])
 
-# define range of orange from cargo ball in HSV
-lower_orange = np.array([0, 193, 92])
-upper_orange = np.array([23, 255, 255])
 
 
 # Flip image if camera mounted upside down
@@ -284,102 +271,6 @@ def findTargets(frame, mask, value_array, centerX, centerY):
     # Shows the contours overlayed on the original video
     return value_array
 
-
-# Draws Contours and finds center and yaw of orange ball
-# centerX is center x coordinate of image
-# centerY is center y coordinate of image
-def findBall(contours, image, centerX, centerY):
-    screenHeight, screenWidth, channels = image.shape;
-    # Seen vision targets (correct angle, adjacent to each other)
-    cargo = []
-
-    if len(contours) > 0:
-        # Sort contours by area size (biggest to smallest)
-        cntsSorted = sorted(contours, key=lambda x: cv2.contourArea(x), reverse=True)
-
-        biggestCargo = []
-        for cnt in cntsSorted:
-            x, y, w, h = cv2.boundingRect(cnt)
-            aspect_ratio = float(w) / h
-            # Get moments of contour; mainly for centroid
-            M = cv2.moments(cnt)
-            # Get convex hull (bounding polygon on contour)
-            hull = cv2.convexHull(cnt)
-            # Calculate Contour area
-            cntArea = cv2.contourArea(cnt)
-            # Filters contours based off of size
-            if (checkBall(cntArea, aspect_ratio)):
-                ### MOSTLY DRAWING CODE, BUT CALCULATES IMPORTANT INFO ###
-                # Gets the centeroids of contour
-                if M["m00"] != 0:
-                    cx = int(M["m10"] / M["m00"])
-                    cy = int(M["m01"] / M["m00"])
-                else:
-                    cx, cy = 0, 0
-                if (len(biggestCargo) < 3):
-
-                    ##### DRAWS CONTOUR######
-                    # Gets rotated bounding rectangle of contour
-                    rect = cv2.minAreaRect(cnt)
-                    # Creates box around that rectangle
-                    box = cv2.boxPoints(rect)
-                    # Not exactly sure
-                    box = np.int0(box)
-                    # Draws rotated rectangle
-                    cv2.drawContours(image, [box], 0, (23, 184, 80), 3)
-
-                    # Draws a vertical white line passing through center of contour
-                    cv2.line(image, (cx, screenHeight), (cx, 0), (255, 255, 255))
-                    # Draws a white circle at center of contour
-                    cv2.circle(image, (cx, cy), 6, (255, 255, 255))
-
-                    # Draws the contours
-                    cv2.drawContours(image, [cnt], 0, (23, 184, 80), 1)
-
-                    # Gets the (x, y) and radius of the enclosing circle of contour
-                    (x, y), radius = cv2.minEnclosingCircle(cnt)
-                    # Rounds center of enclosing circle
-                    center = (int(x), int(y))
-                    # Rounds radius of enclosning circle
-                    radius = int(radius)
-                    # Makes bounding rectangle of contour
-                    rx, ry, rw, rh = cv2.boundingRect(cnt)
-
-                    # Draws countour of bounding rectangle and enclosing circle in green
-                    cv2.rectangle(image, (rx, ry), (rx + rw, ry + rh), (23, 184, 80), 1)
-
-                    cv2.circle(image, center, radius, (23, 184, 80), 1)
-
-                    # Appends important info to array
-                    if not biggestCargo:
-                        biggestCargo.append([cx, cy])
-                    elif [cx, cy, cnt] not in biggestCargo:
-                        biggestCargo.append([cx, cy])
-
-        # Check if there are cargo seen
-        if (len(biggestCargo) > 0):
-            # Sorts targets based on x coords to break any angle tie
-            biggestCargo.sort(key=lambda x: math.fabs(x[0]))
-            closestCargo = min(biggestCargo, key=lambda x: (math.fabs(x[0] - centerX)))
-            xCoord = closestCargo[0]
-            finalTarget = calculateYaw(xCoord, centerX, H_FOCAL_LENGTH)
-            print("Yaw: " + str(finalTarget))
-            # Puts the yaw on screen
-            # Draws yaw of target + line where center of target is
-            cv2.putText(image, "Yaw: " + str(finalTarget), (40, 40), cv2.FONT_HERSHEY_COMPLEX, .6,
-                        (255, 255, 255))
-            cv2.line(image, (int(xCoord), screenHeight), (int(xCoord), 0), (255, 0, 0), 2)
-
-            currentAngleError = finalTarget
-
-        cv2.line(image, (int(centerX), screenHeight), (int(centerX), 0), (255, 255, 255), 2)
-
-        return image
-
-
-# Draws Contours and finds center and yaw of vision targets
-# centerX is center x coordinate of image
-# centerY is center y coordinate of image
 
 
 def findTape(contours, image, centerX, centerY):
@@ -427,7 +318,7 @@ def findTape(contours, image, centerX, centerY):
                     cx = int(M["m10"] / M["m00"])
                     cy = int(M["m01"] / M["m00"])
                     distCY = 540 - cy
-                    myDistFeet = (calculateDistanceFeet(w))
+                    myDistFeet = (calculate_distance(w))
 
                     ###### New code that has an averaged shooting distance to avoid outliers
 
@@ -542,10 +433,6 @@ def findTape(contours, image, centerX, centerY):
 def checkContours(cntSize, hullSize, aspRatio, contour):
     return cntSize > (image_width / 6) and (len(contour) > minVertices) and (len(contour) < maxVertices) and not (aspRatio < rat_low or aspRatio > rat_high)
 
-# Checks if ball contours are worthy based off of contour area and (not currently) hull area
-def checkBall(cntSize, cntAspectRatio):
-    return (cntSize > (image_width / 2)) and (round(cntAspectRatio) == 1)
-
 
 # Forgot how exactly it works, but it works!
 def translateRotation(rotation, width, height):
@@ -557,7 +444,7 @@ def translateRotation(rotation, width, height):
     return round(rotation)
 
 
-def calculateDistanceFeet(targetPixelWidth):
+def calculate_distance(targetPixelWidth):
     # d = Tft*FOVpixel/(2*Tpixel*tanΘ)
     #Target width in feet * 
     distEst = Tft * camPixelWidth / (2 * targetPixelWidth * tanFOV)
@@ -600,97 +487,15 @@ def grab_contours(cnts):
     return cnts
 
 
-# Perform a Mask on the ball
-# use a range of colors around the ball color to account for lighting
-def MaskBall(frame):
-    blurred = cv2.GaussianBlur(frame, (11, 11), 0)
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, Ball_HSV_Lower, Ball_HSV_Upper)
-    # remove any small blobs left in the mask
-    # mask = cv2.erode(mask, None, iterations=2)
-    # mask = cv2.dilate(mask, None, iterations=2)
-    return mask
-
-
-def CheckBall(CntSize, CntAspectRatio):
-    return (CntSize > (Camera_Image_Width / 2)) and (round(CntAspectRatio) == 1)
-
-
-# For Finding Power Cells
-def findBalls(frame):
-    FoundBalls = []  # Store and Return Tracked Balls
-    ContourList = cv2.findContours(frame.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    ContourList = grab_contours(ContourList)
-
-    # Proceed if we have contours
-    if len(ContourList) > 0:
-        # Sort Contours by Area Size (Largest -> Smallest)
-        SortedContours = sorted(ContourList, key=lambda x: cv2.contourArea(x), reverse=True)
-
-        # Goal is to return the largest ball
-        FoundBall = None
-
-        # Loop through Contour, Large to Smallest in Area
-        for c in SortedContours:
-            ((x, y), radius) = cv2.minEnclosingCircle(c)
-            x_br, y_br, w_br, h_br = cv2.boundingRect(c)
-            # Image Moment is a particular weighted average of image pixel intensities
-            # We can use it to find the center
-            M = cv2.moments(c)
-            center = 0
-            centerX = 0
-            try:
-                cy = int(M["m01"] / M["m00"])
-                cx = int(M["m10"] / M["m00"])
-                center = (cx, cy)
-            except:
-                continue
-
-            CntArea = cv2.contourArea(c)
-
-            # Ignore small contours
-            if CntArea < 150:
-                continue
-
-            cnt_aspect_ratio = float(w_br) / h_br
-            AspectRatioCheck = (round(cnt_aspect_ratio) == 1)
-
-            OkayBall = AspectRatioCheck
-            if OkayBall == True:
-                # This is a Target!
-                #		Lets calculate now!
-                ball = {}
-                ball['Type'] = 1
-                ball['CX'] = cx
-                ball['CY'] = cy
-
-                finalTarget = calculateYaw(cx, centerX, H_FOCAL_LENGTH)
-                ball['Yaw'] = finalTarget
-                ball['Size'] = CntArea
-
-                # Set our Found Ball
-                if FoundBall == None:
-                    FoundBall = ball
-                elif FoundBall['Size'] < ball['Size']:
-                    FoundBall = ball
-                print("Tracking Ball: " + str(ball['Yaw']))
-
-        # Check if we have a found ball for this frame
-        if not FoundBall == None:
-            # print("Found Ball!")
-            # print(FoundBall)(
-            PacketQueue.put_nowait(FoundBall)
-    return FoundBalls
-
-
 # Proccesses each frame of the image
 # boolean to whether we want ball tracking or tape tracking
 def ProcessFrame(frame, tape):
     if (tape == True):
         threshold = threshold_video(lower_green, upper_green, frame)
         
-        rect1 = cv2.rectangle(frame, (0, 300), (640, 480), (0,0,0), -1)
-        processedValues = findTargets(rect1, threshold, vals_to_send, centerX, centerY)
+        #Create mask over robot parts
+        maskedImage = cv2.rectangle(frame, (0, 300), (640, 480), (0,0,0), -1)
+        processedValues = findTargets(maskedImage, threshold, vals_to_send, centerX, centerY)
         
         if processedValues[3] != None:
             print(processedValues[3])
@@ -709,36 +514,6 @@ def ProcessFrame(frame, tape):
             PacketQueue.put_nowait(highGoal)
 
 
-    # Tape Process!
-    # APPLY A BLUE TO BLUR THE LINES
-    else:
-        # Ball Tracker!
-        original_frame = frame.copy()
-        frame = MaskBall(frame)  # Filter and Mask by HSV Values
-        Targets = findBalls(frame)
-
-        '''
-        #Debug Drawing Code
-        for Targ in Targets:
-            original_frame = cv2.circle(original_frame, (Targ['x'], Targ['y']), Targ['radius'], (255, 0, 0), 2)
-            original_frame = cv2.circle(original_frame, Targ['center'], 4, (0, 0, 255), -1)
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            # org
-            org = (Targ['x'], Targ['y'])
-            # fontScale
-            fontScale = .5
-            # Blue color in BGR
-            color = (255, 0, 0)
-            # Line thickness of 2 px
-            thickness = 2
-            # Using cv2.putText() method
-            original_frame = cv2.putText(original_frame, str(Targ['aspectratio']), org, font, fontScale, color, thickness, cv2.LINE_AA)
-        cv2.imwrite("of1" + str(val) +  ".jpg", original_frame)
-        '''
-
-        someprint = print("end of process frame")
-
-        return processedFrame
 
 
 # Link to further explanation: https://docs.google.com/presentation/d/1ediRsI-oR3-kwawFJZ34_ZTlQS2SDBLjZasjzZ-eXbQ/pub?start=false&loop=false&slide=id.g12c083cffa_0_298
